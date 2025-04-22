@@ -9,10 +9,9 @@ import xml.etree.ElementTree as ET
 from transformers import pipeline
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 
 # -------------------------
-# PATH SETUP
+# ABSOLUTE PATH SETUP
 # -------------------------
 DATA_DIR = "/content/drive/MyDrive/YouTube Sourcing"
 SEEN_FILE = os.path.join(DATA_DIR, "seen_channels.pickle")
@@ -132,26 +131,8 @@ def channel_age_months(published_at):
 
 def build_link(cid, custom_url=None):
     if custom_url and custom_url.startswith('@'):
-        return f"https://www.youtube.com/{custom_url}"
+        return f"https://www.youtube.com/{custom_url.lower()}"
     return f"https://www.youtube.com/channel/{cid}"
-
-def get_all_existing_ids(creds):
-    svc = build('sheets', 'v4', credentials=creds)
-    ids = set()
-    for tab in ALL_TABS:
-        try:
-            vals = svc.spreadsheets().values().get(
-                spreadsheetId=SPREADSHEET_ID,
-                range=f"{tab}!C2:C"
-            ).execute().get('values', [])
-            for row in vals:
-                if row and row[0]:
-                    url = row[0].strip().lower()
-                    if url.startswith("https://www.youtube.com/@") or url.startswith("https://youtube.com/@"):
-                        ids.add(url.split('@')[1])
-        except:
-            pass
-    return ids
 
 def ensure_sheet(creds, tab):
     svc = build('sheets', 'v4', credentials=creds)
@@ -211,11 +192,55 @@ def update_spreadsheet_with_rss(creds, sheet):
         body={"values": updated}
     ).execute()
 
+def search_channels(youtube, term):
+    cache = load_cache()
+    if term in cache and cache_valid(cache[term]):
+        return cache[term]['items']
+    items, token = [], None
+    for _ in range(MAX_PAGES):
+        resp = youtube.search().list(
+            part='snippet', type='channel',
+            q=term, maxResults=50,
+            order='relevance', pageToken=token
+        ).execute()
+        items += resp.get('items', [])
+        token = resp.get('nextPageToken')
+        if not token:
+            break
+        time.sleep(1.5)
+    cache[term] = {'items': items, 'timestamp': time.time()}
+    save_cache(cache)
+    return items
+
+def fetch_details(youtube, ids):
+    info = {}
+    for i in range(0, len(ids), 50):
+        chunk = ids[i:i+50]
+        resp = youtube.channels().list(
+            part='snippet,statistics,brandingSettings,topicDetails',
+            id=','.join(chunk)
+        ).execute()
+        for ch in resp.get('items', []):
+            cid = ch['id']
+            sn = ch['snippet']; st = ch['statistics']; bs = ch.get('brandingSettings', {}).get('channel', {})
+            td = ch.get('topicDetails', {})
+            info[cid] = {
+                'title': sn.get('title',''),
+                'customUrl': sn.get('customUrl',''),
+                'desc': sn.get('description',''),
+                'tags': bs.get('keywords','').split(',') if bs.get('keywords') else [],
+                'channelCategory': ' '.join(td.get('topicCategories',[])),
+                'subs': int(st.get('subscriberCount',0)),
+                'views': int(st.get('viewCount',0)),
+                'publishedAt': sn.get('publishedAt',''),
+                'latestTitle':'','latestVideoDesc':''
+            }
+    return info
+
 def main():
     creds = get_credentials()
     yt = build('youtube','v3',credentials=creds)
     seen = load_seen()
-    existing_ids = get_all_existing_ids(creds)
     total = 0
     category_counts = {c: 0 for c in CATEGORY_TABS}
 
@@ -224,21 +249,26 @@ def main():
         items = search_channels(yt, term)
         ids = [it['snippet']['channelId'] for it in items]
         details = fetch_details(yt, ids)
-        pairs = list(details.items())
-        metas = [meta for cid, meta in pairs]
-        labels = classify_zero_shot_batch(metas, batch_size=16)
+        pairs = [(cid, d) for cid, d in details.items() if cid.lower() not in seen]
+        if not pairs:
+            print(f" → No new channels for {term}")
+            continue
 
+        metas = [d for _, d in pairs]
+        labels = classify_zero_shot_batch(metas, batch_size=16)
         category_rows = {c: [] for c in CATEGORY_TABS}
+
         for (cid, d), cat in zip(pairs, labels):
             print(f" • Evaluating {cid} → Classified as: {cat}")
-            if cat == 'Exclude': continue
-            handle = d['customUrl'].lstrip('@').lower()
-            if handle in existing_ids or handle in seen: continue
-            if d['subs'] < MIN_SUBSCRIBERS: continue
+            if cat == 'Exclude':
+                continue
+            if d['subs'] < MIN_SUBSCRIBERS:
+                continue
             m = channel_age_months(d['publishedAt'])
             low = (d['views']/m)/1000 * 2.5 * 0.75
             high = (d['views']/m)/1000 * 2.5 * 1.25
-            if low < 4000 or high > 100000: continue
+            if low < 4000 or high > 100000:
+                continue
             row = [
                 time.strftime("%-m/%-d/%Y"),
                 "YouTube API",
@@ -249,10 +279,13 @@ def main():
                 "",
                 extract_email(d['desc']),
                 *['']*8,
-                "", cid
+                "",
+                cid
             ]
             category_rows.setdefault(cat, []).append(row)
-            seen.add(handle); total += 1; category_counts[cat] += 1
+            seen.add(cid.lower())
+            total += 1
+            category_counts[cat] += 1
 
         for cat, rows in category_rows.items():
             if rows:
@@ -265,6 +298,7 @@ def main():
     for cat, count in category_counts.items():
         if count:
             print(f"  • {cat}: {count}")
+
     time.sleep(5)
     for tab in CATEGORY_TABS:
         update_spreadsheet_with_rss(creds, tab)
