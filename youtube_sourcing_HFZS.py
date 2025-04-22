@@ -55,20 +55,15 @@ def truncate(text, max_chars=500):
 
 def build_sequence(meta):
     return (
-        f"Channel Title: {meta.get('title','')}
-"
-        f"Handle: {meta.get('customUrl','')}
-"
-        f"About: {truncate(meta.get('desc',''))}
-"
-        f"Tags: {', '.join(meta.get('tags',[]))}
-"
-        f"Latest Video Title: {meta.get('latestTitle','')}
-"
-        f"Latest Video Description: {truncate(meta.get('latestVideoDesc',''))}
-"
+        f"Channel Title: {meta.get('title','')}\n"
+        f"Handle: {meta.get('customUrl','')}\n"
+        f"About: {truncate(meta.get('desc',''))}\n"
+        f"Tags: {', '.join(meta.get('tags',[]))}\n"
+        f"Latest Video Title: {meta.get('latestTitle','')}\n"
+        f"Latest Video Description: {truncate(meta.get('latestVideoDesc',''))}\n"
         f"Channel Category: {meta.get('channelCategory','')}"
     )
+
 
 def chunkify(lst, chunk_size):
     for i in range(0, len(lst), chunk_size):
