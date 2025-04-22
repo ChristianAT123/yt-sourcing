@@ -35,7 +35,7 @@ CURATED_SEARCH_TERMS = [
     "Science & Curiosity", "Luxury & High-End Lifestyle",
     "Real Estate & Investing", "Motivational & Self-Development"
 ]
-MAX_PAGES = 2
+MAX_PAGES = 4
 MIN_SUBSCRIBERS = 1000
 CATEGORY_TABS = CURATED_SEARCH_TERMS + ["Unassigned"]
 OUTREACH_TABS = ["GeneralCreators - Outreach", "LongFormCreators - Outreach"]
@@ -267,7 +267,7 @@ def main():
             m = channel_age_months(d['publishedAt'])
             low = (d['views']/m)/1000 * 2.5 * 0.75
             high = (d['views']/m)/1000 * 2.5 * 1.25
-            if low < 4000 or high > 100000:
+            if low < 3500 or high > 350000:
                 continue
             row = [
                 time.strftime("%-m/%-d/%Y"),
