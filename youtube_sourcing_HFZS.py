@@ -12,15 +12,22 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 # -------------------------
+# ABSOLUTE PATH SETUP FOR GOOGLE DRIVE FILES
+# -------------------------
+DATA_DIR = "/content/drive/MyDrive/YouTube Sourcing"
+
+SEEN_FILE = os.path.join(DATA_DIR, "seen_channels.pickle")
+CACHE_FILE = os.path.join(DATA_DIR, "search_cache.json")
+SERVICE_ACCOUNT_FILE = os.path.join(DATA_DIR, "service_account.json")
+SPREADSHEET_ID = "12ZCiyliodaReN7PxByGMDKberiWP9kHuozK50hd_8jg"
+
+# -------------------------
 # CONFIGURATION
 # -------------------------
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.readonly",
     "https://www.googleapis.com/auth/spreadsheets"
 ]
-SERVICE_ACCOUNT_FILE = "service_account.json"
-SPREADSHEET_ID = "12ZCiyliodaReN7PxByGMDKberiWP9kHuozK50hd_8jg"
-
 CURATED_SEARCH_TERMS = [
     "Technology & Gadgets", "Personal Finance & Investing", "Health & Wellness",
     "Beauty & Fashion", "Gaming", "Education & How-To Content",
@@ -32,45 +39,41 @@ CURATED_SEARCH_TERMS = [
 ]
 MAX_PAGES = 2
 MIN_SUBSCRIBERS = 1000
-SEEN_FILE = "seen_channels.pickle"
-CACHE_FILE = "search_cache.json"
-CACHE_EXPIRATION = 86400
 CATEGORY_TABS = CURATED_SEARCH_TERMS + ["Unassigned"]
 OUTREACH_TABS = ["GeneralCreators - Outreach", "LongFormCreators - Outreach"]
 ALL_TABS = CATEGORY_TABS + OUTREACH_TABS
 CATEGORIES = CURATED_SEARCH_TERMS + ["Unassigned", "Exclude"]
 
-# Initialize zero-shot classifier (set device=0 for Colab GPU, -1 for CPU)
 classifier = pipeline(
     "zero-shot-classification",
     model="facebook/bart-large-mnli",
-    device=0   # change to -1 if running on CPU-only
+    device=0
 )
 
-# -------------------------
-# HELPERS
-# -------------------------
 def truncate(text, max_chars=500):
     return text[:max_chars] + ("…" if len(text) > max_chars else "")
 
-# build the sequence string for classification
 def build_sequence(meta):
     return (
-        f"Channel Title: {meta.get('title','')}\n"
-        f"Handle: {meta.get('customUrl','')}\n"
-        f"About: {truncate(meta.get('desc',''))}\n"
-        f"Tags: {', '.join(meta.get('tags',[]))}\n"
-        f"Latest Video Title: {meta.get('latestTitle','')}\n"
-        f"Latest Video Description: {truncate(meta.get('latestVideoDesc',''))}\n"
+        f"Channel Title: {meta.get('title','')}
+"
+        f"Handle: {meta.get('customUrl','')}
+"
+        f"About: {truncate(meta.get('desc',''))}
+"
+        f"Tags: {', '.join(meta.get('tags',[]))}
+"
+        f"Latest Video Title: {meta.get('latestTitle','')}
+"
+        f"Latest Video Description: {truncate(meta.get('latestVideoDesc',''))}
+"
         f"Channel Category: {meta.get('channelCategory','')}"
     )
 
-# chunk a list into fixed-size batches
 def chunkify(lst, chunk_size):
     for i in range(0, len(lst), chunk_size):
         yield lst[i:i + chunk_size]
 
-# batch classify a list of metas
 def classify_zero_shot_batch(metas, batch_size=16):
     sequences = [build_sequence(m) for m in metas]
     labels = []
@@ -81,30 +84,16 @@ def classify_zero_shot_batch(metas, batch_size=16):
             hypothesis_template="This channel is about {}.",
             multi_label=False
         )
-        # pipeline returns a dict or list of dicts
         if isinstance(out, dict):
             labels.append(out['labels'][0])
         else:
             labels.extend([item['labels'][0] for item in out])
-    # map 'News & Commentary' to 'Exclude'
-    return [lbl if lbl != 'News & Commentary' else 'Exclude' for lbl in labels]
-
-# fall back single classify (not used normally)
-def classify_zero_shot(meta):
-    return classify_zero_shot_batch([meta], batch_size=1)[0]
-
-# -------------------------
-# AUTHENTICATION
-# -------------------------
+    return [lbl if lbl != 'News & Commentary' else 'News & Commentary' for lbl in labels]
 
 def get_credentials():
     return service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE, scopes=SCOPES
     )
-
-# -------------------------
-# STATE PERSISTENCE
-# -------------------------
 
 def load_seen():
     if os.path.exists(SEEN_FILE):
@@ -112,14 +101,9 @@ def load_seen():
             return pickle.load(f)
     return set()
 
-
 def save_seen(seen):
     with open(SEEN_FILE, 'wb') as f:
         pickle.dump(seen, f)
-
-# -------------------------
-# CACHING SEARCH RESULTS
-# -------------------------
 
 def load_cache():
     try:
@@ -127,32 +111,23 @@ def load_cache():
     except:
         return {}
 
-
 def save_cache(cache):
     with open(CACHE_FILE, 'w') as f:
         json.dump(cache, f)
 
-
 def cache_valid(entry):
-    return (time.time() - entry.get('timestamp', 0)) < CACHE_EXPIRATION
-
-# -------------------------
-# EXTRACTORS & FORMATTERS
-# -------------------------
+    return (time.time() - entry.get('timestamp', 0)) < 86400
 
 def extract_email(text):
     m = re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
     return m[0] if m else ''
 
-
 def extract_instagram(text):
     m = re.findall(r"(?:https?://)?(?:www\.)?instagram\.com/([\w\.]+)", text)
     return '@' + m[0] if m else ''
 
-
 def format_currency(x):
     return f"${int(x):,}"
-
 
 def channel_age_months(published_at):
     try:
@@ -162,15 +137,10 @@ def channel_age_months(published_at):
     now = datetime.datetime.now(datetime.timezone.utc)
     return max(1.0, (now - dt).days / 30.0)
 
-
 def build_link(cid, custom_url=None):
     if custom_url and custom_url.startswith('@'):
-        return f"https://youtube.com/{custom_url}"
+        return f"https://www.youtube.com/{custom_url}"
     return f"https://www.youtube.com/channel/{cid}"
-
-# -------------------------
-# YOUTUBE & SHEETS UTILS
-# -------------------------
 
 def get_all_existing_ids(creds):
     svc = build('sheets', 'v4', credentials=creds)
@@ -188,6 +158,63 @@ def get_all_existing_ids(creds):
             pass
     return ids
 
+def ensure_sheet(creds, tab):
+    svc = build('sheets', 'v4', credentials=creds)
+    ss = svc.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
+    names = [s['properties']['title'] for s in ss['sheets']]
+    if tab not in names:
+        svc.spreadsheets().batchUpdate(
+            spreadsheetId=SPREADSHEET_ID,
+            body={'requests':[{'addSheet':{'properties':{'title':tab,'gridProperties':{'columnCount':18}}}}]}
+        ).execute()
+
+def append_rows(creds, tab, rows):
+    svc = build('sheets', 'v4', credentials=creds)
+    svc.spreadsheets().values().append(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"{tab}!A2:R",
+        valueInputOption='RAW',
+        body={'values':rows}
+    ).execute()
+
+def get_latest_video_description_rss(cid):
+    url = f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        root = ET.fromstring(r.content)
+        ns = {'atom':'http://www.w3.org/2005/Atom','media':'http://search.yahoo.com/mrss/'}
+        ent = root.find('atom:entry', ns)
+        if ent:
+            desc = ent.find('media:group/media:description', ns)
+            return desc.text if desc is not None else ''
+    except:
+        pass
+    return ''
+
+def update_spreadsheet_with_rss(creds, sheet):
+    svc = build("sheets", "v4", credentials=creds)
+    rng = f"{sheet}!A2:R"
+    data = svc.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=rng).execute().get("values",[])
+    updated = []
+    for row in data:
+        if len(row) < 18:
+            row += [""] * (18 - len(row))
+        cid = row[17]
+        rss = get_latest_video_description_rss(cid)
+        if rss:
+            em = extract_email(rss)
+            ins = extract_instagram(rss)
+            if em: row[7] = em
+            if ins: row[5] = ins
+        updated.append(row)
+        time.sleep(1)
+    svc.spreadsheets().values().update(
+        spreadsheetId=SPREADSHEET_ID,
+        range=rng,
+        valueInputOption="RAW",
+        body={"values": updated}
+    ).execute()
 
 def search_channels(youtube, term):
     cache = load_cache()
@@ -208,7 +235,6 @@ def search_channels(youtube, term):
     cache[term] = {'items': items, 'timestamp': time.time()}
     save_cache(cache)
     return items
-
 
 def fetch_details(youtube, ids):
     info = {}
@@ -235,50 +261,12 @@ def fetch_details(youtube, ids):
             }
     return info
 
-
-def ensure_sheet(creds, tab):
-    svc = build('sheets', 'v4', credentials=creds)
-    ss = svc.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
-    names = [s['properties']['title'] for s in ss['sheets']]
-    if tab not in names:
-        svc.spreadsheets().batchUpdate(
-            spreadsheetId=SPREADSHEET_ID,
-            body={'requests':[{'addSheet':{'properties':{'title':tab,'gridProperties':{'columnCount':17}}}}]}
-        ).execute()
-
-
-def append_rows(creds, tab, rows):
-    svc = build('sheets', 'v4', credentials=creds)
-    svc.spreadsheets().values().append(
-        spreadsheetId=SPREADSHEET_ID,
-        range=f"{tab}!A2:Q",
-        valueInputOption='RAW',
-        body={'values':rows}
-    ).execute()
-
-
-def get_latest_video_description_rss(cid):
-    url = f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
-    try:
-        r = requests.get(url, timeout=10); r.raise_for_status()
-        root = ET.fromstring(r.content)
-        ns={'atom':'http://www.w3.org/2005/Atom','media':'http://search.yahoo.com/mrss/'}
-        ent = root.find('atom:entry', ns)
-        if ent:
-            desc = ent.find('media:group/media:description', ns)
-            return desc.text if desc is not None else ''
-    except:
-        pass
-    return ''
-
-# -------------------------
-# MAIN
-# -------------------------
 def main():
     creds = get_credentials()
     yt = build('youtube','v3',credentials=creds)
     seen = load_seen()
     total = 0
+    category_counts = {c: 0 for c in CATEGORY_TABS}
 
     for term in CURATED_SEARCH_TERMS:
         print(f"🔍 Searching YouTube for category: {term}")
@@ -289,13 +277,10 @@ def main():
             continue
 
         details = fetch_details(yt, ids)
-        pairs = list(details.items())  # list of (cid, meta)
-
-        # batch classify
+        pairs = list(details.items())
         metas = [meta for cid, meta in pairs]
         labels = classify_zero_shot_batch(metas, batch_size=16)
 
-        # collect rows per category
         category_rows = {c: [] for c in CATEGORY_TABS}
         for (cid, d), cat in zip(pairs, labels):
             print(f" • Evaluating {cid} → Classified as: {cat}")
@@ -318,27 +303,29 @@ def main():
                 "",
                 extract_email(d['desc']),
                 *['']*8,
-                cid
+                "",  # column Q for manual input
+                cid  # column R: channel ID
             ]
             category_rows.setdefault(cat, []).append(row)
-            seen.add(cid.lower()); total += 1
+            seen.add(cid.lower())
+            total += 1
+            category_counts[cat] += 1
 
-        # append rows live per category
         for cat, rows in category_rows.items():
             if rows:
                 ensure_sheet(creds, cat)
                 append_rows(creds, cat, rows)
 
-        # save seen after each term
         save_seen(seen)
 
-    # final RSS update
+    print(f"🎯 Total Channels Added: {total}")
+    for cat, count in category_counts.items():
+        if count:
+            print(f"  • {cat}: {count}")
+
     time.sleep(5)
-    creds = get_credentials()
     for tab in CATEGORY_TABS:
         update_spreadsheet_with_rss(creds, tab)
-
-    print(f"🎯 Channels added: {total}")
 
 if __name__ == '__main__':
     main()
