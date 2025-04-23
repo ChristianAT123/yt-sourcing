@@ -14,27 +14,28 @@ from googleapiclient.discovery import build
 # -------------------------
 # ABSOLUTE PATH SETUP
 # -------------------------
-INPUT_DIR    = os.getenv("DATA_DIR", ".")
-WORK_DIR     = os.getenv("WORK_DIR", ".")
+INPUT_DIR = os.getenv("DATA_DIR", ".")
+WORK_DIR  = os.getenv("WORK_DIR", ".")
 
-CACHE_IN     = os.path.join(INPUT_DIR, "search_cache.json")
-SA_IN        = os.path.join(INPUT_DIR, "service_account.json")
-IAB_IN       = os.path.join(INPUT_DIR, "iab_taxonomy.json")
-
-CACHE_FILE   = os.path.join(WORK_DIR, "search_cache.json")
-SA_FILE      = os.path.join(WORK_DIR, "service_account.json")
-IAB_FILE     = os.path.join(WORK_DIR, "iab_taxonomy.json")
-TERM_HIST    = os.path.join(WORK_DIR, "term_history.json")
-
-for src, dst in [(CACHE_IN, CACHE_FILE), (SA_IN, SA_FILE), (IAB_IN, IAB_FILE)]:
+for name in ("search_cache.json", "service_account.json", "iab_taxonomy.json"):
+    src = os.path.join(INPUT_DIR, name)
+    dst = os.path.join(WORK_DIR, name)
     if os.path.exists(src) and not os.path.exists(dst):
         shutil.copy(src, dst)
+
+CACHE_FILE = os.path.join(WORK_DIR, "search_cache.json")
+SA_FILE    = os.path.join(WORK_DIR, "service_account.json")
+IAB_FILE   = os.path.join(WORK_DIR, "iab_taxonomy.json")
+TERM_HIST  = os.path.join(WORK_DIR, "term_history.json")
+
+# Print path so you can verify where the file is written
+print("TERM_HIST path =", TERM_HIST)
 
 # -------------------------
 # CONFIGURATION
 # -------------------------
-SPREADSHEET_ID    = "12ZCiyliodaReN7PxByGMDKberiWP9kHuozK50hd_8jg"
-SCOPES            = [
+SPREADSHEET_ID   = "12ZCiyliodaReN7PxByGMDKberiWP9kHuozK50hd_8jg"
+SCOPES           = [
     "https://www.googleapis.com/auth/youtube.readonly",
     "https://www.googleapis.com/auth/spreadsheets"
 ]
@@ -48,14 +49,14 @@ CURATED_SEARCH_TERMS = [
     "Science & Curiosity","Luxury & High-End Lifestyle",
     "Real Estate & Investing","Motivational & Self-Development"
 ]
-CATEGORY_TABS    = CURATED_SEARCH_TERMS + ["Unassigned"]
-OUTREACH_TABS    = ["GeneralCreators - Outreach","LongFormCreators - Outreach"]
-ALL_TABS         = CATEGORY_TABS + OUTREACH_TABS
+CATEGORY_TABS = CURATED_SEARCH_TERMS + ["Unassigned"]
+OUTREACH_TABS = ["GeneralCreators - Outreach","LongFormCreators - Outreach"]
+ALL_TABS      = CATEGORY_TABS + OUTREACH_TABS
 
-MAX_PAGES        = 4
-PAGES_PER_SEED   = 1
-SEEDS_PER_RUN    = 50
-MIN_SUBSCRIBERS  = 1000
+MAX_PAGES       = 4
+PAGES_PER_SEED  = MAX_PAGES       # ← fetch all 4 pages per seed
+SEEDS_PER_RUN   = 50
+MIN_SUBSCRIBERS = 1000
 
 classifier = pipeline(
     "zero-shot-classification",
@@ -220,10 +221,10 @@ def append_rows(creds, tab, rows):
 def get_latest_video_description_rss(cid):
     url = f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
     try:
-        r   = requests.get(url, timeout=10); r.raise_for_status()
-        root= ET.fromstring(r.content)
-        ns  = {'atom':'http://www.w3.org/2005/Atom','media':'http://search.yahoo.com/mrss/'}
-        ent = root.find('atom:entry', ns)
+        r    = requests.get(url, timeout=10); r.raise_for_status()
+        root = ET.fromstring(r.content)
+        ns   = {'atom':'http://www.w3.org/2005/Atom','media':'http://search.yahoo.com/mrss/'}
+        ent  = root.find('atom:entry', ns)
         if ent:
             desc = ent.find('media:group/media:description', ns)
             return desc.text if desc is not None else ""
@@ -232,11 +233,11 @@ def get_latest_video_description_rss(cid):
     return ""
 
 def update_spreadsheet_with_rss(creds, sheet):
-    svc     = build("sheets","v4",credentials=creds)
-    rng     = f"{sheet}!A2:R"
-    data    = svc.spreadsheets().values().get(
-                  spreadsheetId=SPREADSHEET_ID, range=rng
-              ).execute().get("values", [])
+    svc  = build("sheets","v4",credentials=creds)
+    rng  = f"{sheet}!A2:R"
+    data = svc.spreadsheets().values().get(
+               spreadsheetId=SPREADSHEET_ID, range=rng
+           ).execute().get("values", [])
     updated = []
     for row in data:
         if len(row) < 18:
@@ -288,8 +289,7 @@ def fetch_details(youtube, ids):
             id=",".join(chunk)
         ).execute()
         for ch in resp.get("items", []):
-            cid = ch["id"]
-            sn, st = ch["snippet"], ch["statistics"]
+            cid, sn, st = ch["id"], ch["snippet"], ch["statistics"]
             bs = ch.get("brandingSettings", {}).get("channel", {})
             td = ch.get("topicDetails", {})
             info[cid] = {
@@ -307,25 +307,21 @@ def fetch_details(youtube, ids):
     return info
 
 def main():
-    creds         = get_credentials()
-    seen_urls     = load_seen_links_from_sheet(creds)
-    term_history  = load_term_history()
-    yt            = build("youtube","v3",credentials=creds)
+    creds        = get_credentials()
+    seen_urls    = load_seen_links_from_sheet(creds)
+    term_history = load_term_history()
+    yt           = build("youtube","v3",credentials=creds)
 
-    # pick seeds round-robin
+    # round-robin seed selection until we hit SEEDS_PER_RUN
     seeds = []
     while len(seeds) < SEEDS_PER_RUN:
         for cat, data in term_history.items():
-            suggs = data["suggestions"]
-            if not suggs:
-                continue
-            idx = data.get("last_index", 0)
-            seeds.append((cat, suggs[idx]))
-            data["last_index"] = (idx + 1) % len(suggs)
+            idx  = data["last_index"]
+            seed = data["suggestions"][idx]
+            seeds.append((cat, seed))
+            data["last_index"] = (idx + 1) % len(data["suggestions"])
             if len(seeds) >= SEEDS_PER_RUN:
                 break
-        else:
-            break
     save_term_history(term_history)
 
     total = 0
@@ -344,14 +340,12 @@ def main():
         for (cid, d), label in zip(details.items(), labels):
             link = build_link(cid, d["customUrl"])
             norm = normalize_link(link)
-            if norm in seen_urls:
-                continue
-            if d["subs"] < MIN_SUBSCRIBERS:
+            if norm in seen_urls or d["subs"] < MIN_SUBSCRIBERS:
                 continue
 
-            m    = channel_age_months(d["publishedAt"])
-            low  = (d["views"]/m)/1000 * 2.5 * 0.75
-            high = (d["views"]/m)/1000 * 2.5 * 1.25
+            m   = channel_age_months(d["publishedAt"])
+            low = (d["views"]/m)/1000 * 2.5 * 0.75
+            high= (d["views"]/m)/1000 * 2.5 * 1.25
             if low < 3500 or high > 350000:
                 continue
 
