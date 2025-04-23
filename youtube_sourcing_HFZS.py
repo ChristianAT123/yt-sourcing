@@ -1,4 +1,5 @@
 import os
+import shutil
 import time
 import re
 import json
@@ -13,11 +14,26 @@ from googleapiclient.discovery import build
 # -------------------------
 # ABSOLUTE PATH SETUP
 # -------------------------
-DATA_DIR = os.getenv("DATA_DIR", ".")
-SEEN_FILE            = os.path.join(DATA_DIR, "seen_channels.pickle")
-CACHE_FILE           = os.path.join(DATA_DIR, "search_cache.json")
-SERVICE_ACCOUNT_FILE = os.path.join(DATA_DIR, "service_account.json")
+INPUT_DIR = os.getenv("DATA_DIR", ".")
+WORK_DIR = os.getenv("WORK_DIR", ".")
+
+SEEN_FILE_READ          = os.path.join(INPUT_DIR, "seen_channels.pickle")
+CACHE_FILE_READ         = os.path.join(INPUT_DIR, "search_cache.json")
+SERVICE_ACCOUNT_FILE_IN = os.path.join(INPUT_DIR, "service_account.json")
+
+SEEN_FILE               = os.path.join(WORK_DIR, "seen_channels.pickle")
+CACHE_FILE              = os.path.join(WORK_DIR, "search_cache.json")
+SERVICE_ACCOUNT_FILE    = os.path.join(WORK_DIR, "service_account.json")
+
 SPREADSHEET_ID = "12ZCiyliodaReN7PxByGMDKberiWP9kHuozK50hd_8jg"
+
+for src, dst in [
+    (SEEN_FILE_READ, SEEN_FILE),
+    (CACHE_FILE_READ, CACHE_FILE),
+    (SERVICE_ACCOUNT_FILE_IN, SERVICE_ACCOUNT_FILE)
+]:
+    if os.path.exists(src) and not os.path.exists(dst):
+        shutil.copy(src, dst)
 
 # -------------------------
 # CONFIGURATION
