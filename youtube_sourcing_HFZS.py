@@ -13,9 +13,9 @@ from googleapiclient.discovery import build
 # -------------------------
 # ABSOLUTE PATH SETUP
 # -------------------------
-DATA_DIR = "/content/drive/MyDrive/YouTube Sourcing"
-SEEN_FILE = os.path.join(DATA_DIR, "seen_channels.pickle")
-CACHE_FILE = os.path.join(DATA_DIR, "search_cache.json")
+DATA_DIR = os.getenv("DATA_DIR", ".")
+SEEN_FILE            = os.path.join(DATA_DIR, "seen_channels.pickle")
+CACHE_FILE           = os.path.join(DATA_DIR, "search_cache.json")
 SERVICE_ACCOUNT_FILE = os.path.join(DATA_DIR, "service_account.json")
 SPREADSHEET_ID = "12ZCiyliodaReN7PxByGMDKberiWP9kHuozK50hd_8jg"
 
